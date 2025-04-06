@@ -1,4 +1,4 @@
-function [outsig] = PHAINmain_TF(insig, mask, param, paramsolver)
+function [outsig] = PHAINmain_TF(insig, mask, param, paramsolver,oracle)
 
 % param
 %   .a
@@ -37,6 +37,7 @@ signal_l = size(insig,2)* a;
 [sigIdx, sumIdx, sumArray, ifftArray, rotIdx] = precomputationForFDGT(signal_l, w, a, M);
 
 % DGTs (original, its adjoint, and one with the differentiated window)
+G = @(x) FDGT(x, tight_win, sigIdx, M, rotIdx, zeroPhaseFlag);
 G_adj = @(u) invFDGT(u, tight_win, sumIdx, sumArray, ifftArray, rotIdx, zeroPhaseFlag)*w;
 G_diff = @(x) FDGT(x, diff_win, sigIdx, M, rotIdx, zeroPhaseFlag);
 
@@ -47,17 +48,16 @@ omega = @(x) calcInstFreq(x, G_diff(G_adj(x)), M, w, rotateFlag);
 R = @(z, omega) instPhaseCorrection(z, omega, a, M);
 R_adj = @(z, omega) invInstPhaseCorrection(z, omega, a, M);
 
-% time-directional difference
+% time-directional difference (time variation)
 D = @(z) z(:,1:end-1) - z(:,2:end);
 D_adj = @(z) [z(:,1), (z(:,2:end) - z(:,1:end-1)), -z(:,end)];
 
-
+param.G = G;
+param.G_adj = G_adj;
 %%
 
-gapped = insig.*mask;
-
 soft = @(z, lambda) sign(z).*max(abs(z) - lambda, 0);
-param.proj = @(x) projGamma(x, mask, gapped);
+param.proj = @(x) projGamma(x, mask, insig.*mask);
 
 if strcmp(param.type,'U')
 
@@ -65,32 +65,30 @@ if strcmp(param.type,'U')
     lambda = paramsolver.lambda;
     param.prox = @(z) soft(z, lambda/sigma);
 
+    % first calculate omega from the input signal
     omega_y = omega(insig);
-    param.L2 = @(x) D(R(x, omega_y));
-    param.L2_adj =@(u) R_adj(D_adj(u), omega_y);
+    param.L = @(x) D(R(x, omega_y));
+    param.L_adj =@(u) R_adj(D_adj(u), omega_y);
     x_old = insig;
     
-
+    % set starting x and u for CP alg.
     paramsolver.x0 = insig;
-    paramsolver.u0 = zeros(size(param.L2(insig)));
-
+    paramsolver.u0 = zeros(size(param.L(insig)));
 
     for j = 1:paramsolver.J
+        % calculate CP
+        x_hat = CP_TF(param, paramsolver,oracle);
 
-        [x_hat] = CP_TF(param, paramsolver);
-        
-        if norm(x_old - x_hat) < paramsolver.epsilon
-            disp("stopping criterion met")
-            break
+        % stopping criterion
+        if norm(x_old - x_hat) < paramsolver.epsilon 
+            break 
         end
 
+        % calculate new IF and redefine L and L_adj
         omega_x_hat = omega(x_hat);
-        param.L2 = @(x) D(R(x, omega_x_hat));
-        param.L2_adj =@(u) R_adj(D_adj(u), omega_x_hat);
+        param.L = @(x) D(R(x, omega_x_hat));
+        param.L_adj =@(u) R_adj(D_adj(u), omega_x_hat);
         x_old = x_hat;
-
     end
-
     outsig = x_hat;
-    
 end

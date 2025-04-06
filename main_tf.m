@@ -47,37 +47,36 @@ TIME = NaN(NN, 6, length(methodLabels));
 RESULTS =NaN(NN, 6, length(methodLabels));
 %% parameters
 
-winLen = 2048;
-shiftLen = winLen/4;
-FFTnum = winLen;
+winLen = 2048; % window length
+shiftLen = winLen/4; % hop size
+FFTnum = winLen; % number of rows
 
 % parameter setting for PHAINs
 param.a = shiftLen;
 param.M = FFTnum;
 param.w = winLen;
-param.wtype = 'hann';
-param.Ls = length(data{1});
+param.wtype = 'hann'; % window type
+param.Ls = length(data{1}); % length of input audio signal
 
 paramsolver.epsilon = 0.01;  % for stopping criterion
-
 paramsolver.tau = 0.25;  % step size
 paramsolver.sigma = 1;  % step size
 paramsolver.alpha = 1;  % relaxation parameter
+paramsolver.lambda = 0.01;  % threshold (regularization parameter)
 
-paramsolver.lambda = 1;  % threshold (regularization parameter)
-
-%% %%%%%% fast DGT %%%%%%%%
-[win, ~] = generalizedCosWin(winLen, 'hanning');
+%% fast DGT and invDGT
+% creating a tight window
+[win, ~] = generalizedCosWin(winLen, param.wtype);
 tight_win = calcCanonicalTightWindow(win, shiftLen);
 tight_win = tight_win/norm(tight_win)*sqrt(shiftLen/winLen);
 
-
+% precomputation for fast DGT
 zeroPhaseFlag = true;
-rotateFlag = true;
 [sigIdx, sumIdx, sumArray, ifftArray, rotIdx] = precomputationForFDGT(param.Ls, param.w, param.a, param.M);
 
-param.G1 =@(x) FDGT(x, tight_win, sigIdx, FFTnum, rotIdx, zeroPhaseFlag);
-param.G_adj1 =@(u) invFDGT(u, tight_win, sumIdx, sumArray, ifftArray, rotIdx, zeroPhaseFlag)*winLen;
+% fast DGT and invDGT definition
+param.G =@(x) FDGT(x, tight_win, sigIdx, FFTnum, rotIdx, zeroPhaseFlag);
+param.G_adj =@(u) invFDGT(u, tight_win, sumIdx, sumArray, ifftArray, rotIdx, zeroPhaseFlag)*winLen;
 %% get masks from dpai
 masks = dir("spectrogram_masks\*.mat");
 num_of_masks = length(masks);
@@ -92,11 +91,11 @@ end
 for nn=1:NN % iterate signals
 
     current_signal = data{nn};
-    spect = param.G1(current_signal);
+    spect = param.G(current_signal);
     
-    for m=1:size(my_masks,2) % iterate dpai masks 1--6
+    for m=1:size(my_masks,2) % iterate masks 1--6 from janssen2
 
-        % replace masks if incompatible legth with spec
+        % replace masks if incompatible length with spec
         if size(spect,2)~= size(my_masks(:,m),1)
             my_masks = my_masks(1:size(spect,2),:);
             disp("reduced size")
@@ -120,8 +119,10 @@ for nn=1:NN % iterate signals
             gap_ = gap*m;
             % get index of gap and also affected windows
             gap_indx = indxs_gaps(gap_-m+1:gap_);
-            pad = 8; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% needs proper gap restriction, 12 for testing
-            segment_indx = (gap_indx(1)-pad:gap_indx(1)+m-1+pad);
+            %disp(gap_indx(end))
+            pad = 4; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% needs proper gap restriction, 12 for testing
+            pad = fix_pad(pad,gap_indx);
+            segment_indx = (gap_indx(1)-pad:gap_indx(end)+pad);
 
             segment.mask = current_mask(segment_indx);
             segment.data = spect(:,segment_indx);
@@ -140,9 +141,9 @@ for nn=1:NN % iterate signals
             fprintf('U-PHAIN...gap number: %d\n',gap)
             
             param.type = 'U';
-            paramsolver.I = 20;
+            paramsolver.I =100;
             paramsolver.J = 10;
-            [segment.solution] = PHAINmain_TF(segment.gapped, segment.mask, param, paramsolver);
+            [segment.solution] = PHAINmain_TF(segment.gapped, segment.mask, param, paramsolver,segment.data);
 %             figure, imagesc(20*log10(abs(segment.data))), colorbar, axis xy
 %             figure, imagesc(20*log10(abs(segment.gapped))), colorbar, axis xy
 %             figure, imagesc(20*log10(abs(segment.solution))), colorbar, axis xy
@@ -162,10 +163,10 @@ for nn=1:NN % iterate signals
 %         figure, imagesc(20*log10(abs(solution.(methodLabels{1}){nn,m}))), colorbar, axis xy
 %         figure, imagesc(angle(solution.(methodLabels{1}){nn,m})), colorbar, axis xy
         fprintf('done for example: %d, mask: %d!\n',nn,m)
-        signal_data = param.G_adj1(spect);
-        signal_result = param.G_adj1(solution.(methodLabels{1}){nn,m});
-        figure;plot(signal_data,'Color',[0 0 1 1]), hold on
-        plot(signal_result,'Color',[1 0 0 0.5])
+        signal_data = param.G_adj(spect);
+        signal_result = param.G_adj(solution.(methodLabels{1}){nn,m});
+%         figure;plot(signal_data,'Color',[0 0 1 1]), hold on
+%         plot(signal_result,'Color',[1 0 0 0.5])
         name_audio = "results/example"+nn+"mask"+m+".wav";
         %RESULTS(nn,m,1) = 
         audiowrite(name_audio,signal_result,fs);
