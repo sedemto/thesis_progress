@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # PHAIN (PHase-aware Audio INpainter)
 **Tomoro Tanaka (Department of Intermedia Art and Science, Waseda University, Tokyo, Japan)**\
 [![DOI](https://zenodo.org/badge/690949058.svg)](https://zenodo.org/doi/10.5281/zenodo.10818129)
@@ -43,3 +44,6 @@ Execute `main.m` and run PHAINs (the parameters and data directory can be modifi
 
 ## License
 See the file named `LICENSE`.
+=======
+# thesis progression code
+>>>>>>> 0d6d501973d49564f86081ffe68afe2551a838de
